@@ -21,6 +21,7 @@ async def get_current_temperature_async(town: str, api_key: str):
     api_url = f"http://api.openweathermap.org/data/2.5/weather?q={town}&units=metric&appid={api_key}"
     async with aiohttp.ClientSession() as session:
         try:
+            await asyncio.sleep(5)
             async with session.get(api_url) as response:
                 if response.status != 200:
                     # Например, 404
