@@ -33,13 +33,6 @@ async def get_current_temperature_async(town: str, api_key: str):
             # Ошибки вида таймаута, DNS и т.д.
             return None, str(e)
 
-def get_current_temperature_sync(town: str, api_key: str):
-    """
-    Синхронная обёртка над асинхронной функцией.
-    """
-    return asyncio.run(get_current_temperature_async(town, api_key))
-
-
 #####################
 # Аналитика
 #####################
@@ -123,134 +116,137 @@ def get_season():
 #####################
 # Streamlit-приложение
 #####################
+async def main():
+    st.title("Анализ исторических данных и текущей погоды")
+    st.sidebar.header("Загрузка данных")
+    file = st.sidebar.file_uploader("Загрузите CSV-файл с историческими данными", type="csv")
 
-st.title("Анализ исторических данных и текущей погоды")
-st.sidebar.header("Загрузка данных")
-file = st.sidebar.file_uploader("Загрузите CSV-файл с историческими данными", type="csv")
+    if file is not None:
+        data_original = pd.read_csv(file)
 
-if file is not None:
-    data_original = pd.read_csv(file)
-    
-    # Список городов
-    cities = data_original['city'].unique()
+        # Список городов
+        cities = data_original['city'].unique()
 
-    # Параллельный анализ данных по всем городам
-    task_with_data = partial(parallel_task, data_original)
-    with Pool() as pool:
-        results_for_all_cities = pool.map(task_with_data, cities)
+        # Параллельный анализ данных по всем городам
+        task_with_data = partial(parallel_task, data_original)
+        with Pool() as pool:
+            results_for_all_cities = pool.map(task_with_data, cities)
 
-    # Выбор города
-    selected_city = st.sidebar.selectbox("Выберите город", cities)
-    idx_city = list(cities).index(selected_city)
-    results = results_for_all_cities[idx_city]
+        # Выбор города
+        selected_city = st.sidebar.selectbox("Выберите город", cities)
+        idx_city = list(cities).index(selected_city)
+        results = results_for_all_cities[idx_city]
 
-    # Блок настроек API
-    st.sidebar.header("Настройки API")
-    api_key = st.sidebar.text_input("Введите API-ключ OpenWeatherMap", type="password")
+        # Блок настроек API
+        st.sidebar.header("Настройки API")
+        api_key = st.sidebar.text_input("Введите API-ключ OpenWeatherMap", type="password")
 
-    ###################
-    # Текущая погода
-    ###################
-    current_temp = None
-    if api_key:
-        st.header(f"Текущая погода для города {selected_city}")
-        
-        # Асинхронный вызов через синхронную обёртку
-        current_temp, error = get_current_temperature_sync(selected_city, api_key)
-        
-        if current_temp is not None:
-            st.write(f"Текущая температура: {current_temp} °C")
-        elif error:
-            st.error(f"Ошибка: {error}")
+        ###################
+        # Текущая погода
+        ###################
+        current_temp = None
+        if api_key:
+            st.header(f"Текущая погода для города {selected_city}")
 
-        # Проверка на аномальность: сравниваем с текущим сезоном
-        season_now = get_season()
-        profile_now = results['Профиль сезона'][results['Профиль сезона']['season'] == season_now]
-        if not profile_now.empty and current_temp is not None:
-            mean_temp = float(profile_now['mean_temperature'].iloc[0])
-            std_temp = float(profile_now['std_temperature'].iloc[0])
-            if abs(current_temp - mean_temp) > 2 * std_temp:
-                st.warning("Температура сейчас аномальна для этого сезона!")
-            else:
-                st.info("Температура в рамках нормы для сезона.")
+            # Асинхронный вызов через синхронную обёртку
+            current_temp, error = await get_current_temperature_async(selected_city, api_key)
 
-    ###################
-    # Описательная статистика
-    ###################
-    st.subheader("Описательная статистика")
-    st.write("Город:", results['Статистика']['Город'])
-    st.write("Минимальная температура:", results['Статистика']['Минимальная температура'])
-    st.write("Максимальная температура:", results['Статистика']['Максимальная температура'])
-    st.write("Средняя температура:", results['Статистика']['Средняя температура'])
-    st.write("Наклон тренда:", results['Статистика']['Наклон тренда'])
+            if current_temp is not None:
+                st.write(f"Текущая температура: {current_temp} °C")
+            elif error:
+                st.error(f"Ошибка: {error}")
 
-    ###################
-    # Профиль сезона
-    ###################
-    st.subheader("Профиль сезона")
-    st.write(results['Профиль сезона'])
+            # Проверка на аномальность: сравниваем с текущим сезоном
+            season_now = get_season()
+            profile_now = results['Профиль сезона'][results['Профиль сезона']['season'] == season_now]
+            if not profile_now.empty and current_temp is not None:
+                mean_temp = float(profile_now['mean_temperature'].iloc[0])
+                std_temp = float(profile_now['std_temperature'].iloc[0])
+                if abs(current_temp - mean_temp) > 2 * std_temp:
+                    st.warning("Температура сейчас аномальна для этого сезона!")
+                else:
+                    st.info("Температура в рамках нормы для сезона.")
 
-    ###################
-    # Построение графика
-    ###################
-    df = results['Данные']  # Исходный временной ряд с вычисленными полями
-    anomalies = results['Аномальные точки']
-    
-    # Создаем фигуру Plotly
-    fig = go.Figure()
+        ###################
+        # Описательная статистика
+        ###################
+        st.subheader("Описательная статистика")
+        st.write("Город:", results['Статистика']['Город'])
+        st.write("Минимальная температура:", results['Статистика']['Минимальная температура'])
+        st.write("Максимальная температура:", results['Статистика']['Максимальная температура'])
+        st.write("Средняя температура:", results['Статистика']['Средняя температура'])
+        st.write("Наклон тренда:", results['Статистика']['Наклон тренда'])
 
-    # 1. Исходные данные (температура)
-    fig.add_trace(go.Scatter(
-        x=df['timestamp'],
-        y=df['temperature'],
-        mode='lines',
-        name='Температура'
-    ))
+        ###################
+        # Профиль сезона
+        ###################
+        st.subheader("Профиль сезона")
+        st.write(results['Профиль сезона'])
 
-    # 2. Скользящее среднее
-    fig.add_trace(go.Scatter(
-        x=df['timestamp'],
-        y=df['rolling_mean'],
-        mode='lines',
-        name='Скользящее среднее'
-    ))
+        ###################
+        # Построение графика
+        ###################
+        df = results['Данные']  # Исходный временной ряд с вычисленными полями
+        anomalies = results['Аномальные точки']
 
-    # 3. Тренд (линейная регрессия)
-    fig.add_trace(go.Scatter(
-        x=df['timestamp'],
-        y=df['trend_line'],
-        mode='lines',
-        name='Линия тренда'
-    ))
+        # Создаем фигуру Plotly
+        fig = go.Figure()
 
-    # 4. Аномальные точки
-    if len(anomalies) > 0:
+        # 1. Исходные данные (температура)
         fig.add_trace(go.Scatter(
-            x=anomalies['timestamp'],
-            y=anomalies['temperature'],
-            mode='markers',
-            marker=dict(color='red', size=8),
-            name='Аномалии'
+            x=df['timestamp'],
+            y=df['temperature'],
+            mode='lines',
+            name='Температура'
         ))
 
-    # 5. Горизонтальная линия текущей температуры (если получили current_temp)
-    if current_temp is not None:
-        fig.add_hline(
-            y=current_temp,
-            line_dash='dash',
-            annotation_text=f"Текущая {current_temp} °C",
-            annotation_position="top right"
+        # 2. Скользящее среднее
+        fig.add_trace(go.Scatter(
+            x=df['timestamp'],
+            y=df['rolling_mean'],
+            mode='lines',
+            name='Скользящее среднее'
+        ))
+
+        # 3. Тренд (линейная регрессия)
+        fig.add_trace(go.Scatter(
+            x=df['timestamp'],
+            y=df['trend_line'],
+            mode='lines',
+            name='Линия тренда'
+        ))
+
+        # 4. Аномальные точки
+        if len(anomalies) > 0:
+            fig.add_trace(go.Scatter(
+                x=anomalies['timestamp'],
+                y=anomalies['temperature'],
+                mode='markers',
+                marker=dict(color='red', size=8),
+                name='Аномалии'
+            ))
+
+        # 5. Горизонтальная линия текущей температуры (если получили current_temp)
+        if current_temp is not None:
+            fig.add_hline(
+                y=current_temp,
+                line_dash='dash',
+                annotation_text=f"Текущая {current_temp} °C",
+                annotation_position="top right"
+            )
+
+        # Настройки лейаута
+        fig.update_layout(
+            title=f"Температура во времени ({selected_city})",
+            xaxis_title="Дата",
+            yaxis_title="Температура (°C)",
+            legend_title="Легенда",
         )
 
-    # Настройки лейаута
-    fig.update_layout(
-        title=f"Температура во времени ({selected_city})",
-        xaxis_title="Дата",
-        yaxis_title="Температура (°C)",
-        legend_title="Легенда",
-    )
+        st.plotly_chart(fig, use_container_width=True)
 
-    st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Пожалуйста, загрузите CSV-файл с историческими данными.")
 
-else:
-    st.info("Пожалуйста, загрузите CSV-файл с историческими данными.")
+if __name__ == '__main__':
+    asyncio.run(main())
